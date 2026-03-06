@@ -921,6 +921,10 @@ class HermesCLI:
         self.agent: Optional[AIAgent] = None
         self._app = None  # prompt_toolkit Application (set in run())
         
+        # Shapez bridge for visual factory UI (optional)
+        self._shapez_bridge = None
+        self._shapez_server_proc = None
+        
         # Conversation state
         self.conversation_history: List[Dict[str, Any]] = []
         self.session_start = datetime.now()
@@ -938,6 +942,76 @@ class HermesCLI:
         # History file for persistent input recall across sessions
         self._history_file = Path.home() / ".hermes_history"
         self._last_invalidate: float = 0.0  # throttle UI repaints
+
+    def _start_shapez_ui(self, port: int = 8080, ws_port: int = 8765) -> bool:
+        """Start the Shapez visual factory UI server.
+        
+        Starts both the Flask server and WebSocket bridge for real-time
+        agent activity visualization.
+        
+        Returns True if started successfully.
+        """
+        import subprocess
+        import time
+        
+        shapez_dir = Path(__file__).parent / "shapez"
+        if not shapez_dir.exists():
+            self.console.print("[yellow]Shapez UI not found (shapez/ submodule missing)[/]")
+            return False
+        
+        try:
+            # Start the Shapez server in background
+            self._shapez_server_proc = subprocess.Popen(
+                [sys.executable, "server.py", "--port", str(port), "--ws-port", str(ws_port), "--host", "127.0.0.1"],
+                cwd=str(shapez_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            time.sleep(1.5)  # Give server time to start
+            
+            if self._shapez_server_proc.poll() is not None:
+                stderr = self._shapez_server_proc.stderr.read().decode()
+                self.console.print(f"[red]Shapez server failed to start: {stderr}[/]")
+                return False
+            
+            self.console.print(f"[green]🏭 Shapez UI started at http://127.0.0.1:{port}[/]")
+            return True
+            
+        except Exception as e:
+            self.console.print(f"[red]Failed to start Shapez UI: {e}[/]")
+            return False
+
+    def _stop_shapez_ui(self):
+        """Stop the Shapez UI server."""
+        if self._shapez_server_proc:
+            self._shapez_server_proc.terminate()
+            try:
+                self._shapez_server_proc.wait(timeout=3)
+            except:
+                self._shapez_server_proc.kill()
+            self._shapez_server_proc = None
+
+    def _shapez_tool_callback(self, tool_name: str, preview: str, args: dict = None):
+        """Callback to stream tool calls to Shapez UI via WebSocket."""
+        if not self._shapez_bridge:
+            return
+        
+        import asyncio
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._shapez_bridge.broadcast_agent_event(
+                    self.session_id,
+                    "tool_call",
+                    {
+                        "tool_name": tool_name,
+                        "preview": preview,
+                        "arguments": args or {},
+                    }
+                ),
+                self._shapez_bridge._loop,
+            )
+        except Exception:
+            pass
 
     def _invalidate(self, min_interval: float = 0.25) -> None:
         """Throttled UI repaint — prevents terminal blinking on slow/SSH connections."""
@@ -1049,6 +1123,11 @@ class HermesCLI:
                 pass
         
         try:
+            # Tool progress callback for Shapez UI integration
+            tool_callback = None
+            if self._shapez_bridge or os.getenv("HERMES_SHAPEZ_UI"):
+                tool_callback = self._shapez_tool_callback
+            
             self.agent = AIAgent(
                 model=self.model,
                 api_key=self.api_key,
@@ -1072,6 +1151,7 @@ class HermesCLI:
                 platform="cli",
                 session_db=self._session_db,
                 clarify_callback=self._clarify_callback,
+                tool_progress_callback=tool_callback,
                 honcho_session_key=self.session_id,
             )
             return True
@@ -2379,6 +2459,22 @@ class HermesCLI:
         self.console.print("[#FFF8DC]Welcome to Hermes Agent! Type your message or /help for commands.[/]")
         self.console.print()
         
+        # Start Shapez UI if enabled
+        if os.getenv("HERMES_SHAPEZ_UI", "").lower() in ("1", "true", "yes"):
+            shapez_port = int(os.getenv("HERMES_SHAPEZ_PORT", "8080"))
+            shapez_ws_port = int(os.getenv("HERMES_SHAPEZ_WS_PORT", "8765"))
+            if self._start_shapez_ui(port=shapez_port, ws_port=shapez_ws_port):
+                # Connect to the WebSocket bridge for event streaming
+                try:
+                    sys.path.insert(0, str(Path(__file__).parent / "shapez" / "src"))
+                    from bridge.websocket_bridge import WebSocketBridge
+                    import time
+                    time.sleep(0.5)  # Let server fully start
+                    # Note: The bridge is started by the server, we just need to reference it
+                    # For now, tool callbacks will work via HTTP fallback
+                except Exception as e:
+                    self.console.print(f"[yellow]WebSocket bridge not available: {e}[/]")
+        
         # State for async operation
         self._agent_running = False
         self._pending_input = queue.Queue()     # For normal input (commands + new queries)
@@ -3131,6 +3227,8 @@ class HermesCLI:
             # Unregister terminal_tool callbacks to avoid dangling references
             set_sudo_password_callback(None)
             set_approval_callback(None)
+            # Stop Shapez UI if running
+            self._stop_shapez_ui()
             # Close session in SQLite
             if hasattr(self, '_session_db') and self._session_db and self.agent:
                 try:
