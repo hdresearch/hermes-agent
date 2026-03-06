@@ -4,3 +4,6 @@
 [submodule "tinker-atropos"]
 	path = tinker-atropos
 	url = https://github.com/nousresearch/tinker-atropos
+[submodule "shapez"]
+	path = shapez
+	url = git@github.com:hdresearch/shapez.git

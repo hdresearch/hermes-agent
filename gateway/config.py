@@ -27,6 +27,7 @@ class Platform(Enum):
     WHATSAPP = "whatsapp"
     SLACK = "slack"
     HOMEASSISTANT = "homeassistant"
+    IMESSAGE = "imessage"
 
 
 @dataclass
@@ -389,6 +390,19 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
         hass_url = os.getenv("HASS_URL")
         if hass_url:
             config.platforms[Platform.HOMEASSISTANT].extra["url"] = hass_url
+    
+    # iMessage (macOS only)
+    imessage_enabled = os.getenv("IMESSAGE_ENABLED", "").lower() in ("true", "1", "yes")
+    if imessage_enabled:
+        if Platform.IMESSAGE not in config.platforms:
+            config.platforms[Platform.IMESSAGE] = PlatformConfig()
+        config.platforms[Platform.IMESSAGE].enabled = True
+        # Poll interval in seconds
+        poll_interval = os.getenv("IMESSAGE_POLL_INTERVAL", "2")
+        try:
+            config.platforms[Platform.IMESSAGE].extra["poll_interval"] = float(poll_interval)
+        except ValueError:
+            config.platforms[Platform.IMESSAGE].extra["poll_interval"] = 2.0
 
     # Session settings
     idle_minutes = os.getenv("SESSION_IDLE_MINUTES")

@@ -679,3 +679,107 @@ After making changes:
 2. Run `hermes config check` to verify config
 3. Test with `hermes chat -q "test message"`
 4. For new config options, test fresh install: `rm -rf ~/.hermes && hermes setup`
+
+---
+
+## Anthropic Direct API Support
+
+Hermes now supports direct Anthropic API access via `ANTHROPIC_API_KEY`. This provides:
+- Direct API access without OpenRouter middleman
+- Full prompt caching support
+- Lower latency for Claude models
+
+**Limitations when using Anthropic directly:**
+- Text-to-voice features require OpenRouter (for non-Claude TTS models)
+- Some MoA configurations may not work
+
+**Configuration:**
+```bash
+# In ~/.hermes/.env
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Or set provider explicitly
+HERMES_INFERENCE_PROVIDER=anthropic
+```
+
+**How it works:**
+- `hermes_cli/runtime_provider.py` resolves the provider and returns appropriate credentials
+- `tools/anthropic_client.py` provides an OpenAI-compatible wrapper around Anthropic's SDK
+- `run_agent.py` detects Anthropic provider and uses the wrapper client
+
+---
+
+## iMessage Integration
+
+macOS-only integration using AppleScript for background automation:
+
+**Setup:**
+```bash
+# In ~/.hermes/.env
+IMESSAGE_ENABLED=true
+IMESSAGE_ALLOWED_SENDERS=+1234567890,email@example.com
+IMESSAGE_POLL_INTERVAL=2  # seconds
+```
+
+**Architecture:**
+- `gateway/platforms/imessage.py` - Platform adapter using AppleScript
+- Polls Messages.app for new messages (no webhooks available)
+- Sends responses via AppleScript without opening any windows
+- Requires Automation permissions for terminal/python
+
+**Key features:**
+- Background operation (no UI windows)
+- Sender allowlist for security
+- Configurable poll interval
+- Supports text messages only (no media)
+
+---
+
+## Shapez Visual Factory System
+
+A visual programming interface for agent workflows:
+
+**Location:** `../shapez/`
+
+**Architecture:**
+```
+shapez/
+├── src/
+│   ├── core/           # Factory engine
+│   │   ├── factory.py  # Factory definition and execution
+│   │   ├── block.py    # Block base classes
+│   │   └── connector.py # Block connections
+│   └── bridge/         # Hermes integration
+│       ├── observer.py # Watch agent activity
+│       └── executor.py # Execute factory definitions
+├── factories/          # Saved factory definitions
+└── shapez.py          # CLI entry point
+```
+
+**Block Types:**
+- `tool` - Invokes a Hermes tool
+- `agent` - Spawns a sub-agent with custom prompt
+- `prompt` - Text template with variables
+- `router` - Conditional routing
+- `transform` - Data transformation
+
+**Hermes Tools:**
+- `execute_factory` - Run a factory definition
+- `list_factories` - List available factories
+- `load_factory` - Load factory from file
+
+**CLI Usage:**
+```bash
+# Watch a live session
+shapez observe --session <session_id>
+
+# Run a factory
+shapez run my_factory.json --input query="search term"
+
+# Export as skill
+shapez export my_factory.json --output ~/.hermes/skills/
+```
+
+**Two-way integration:**
+1. **Visualization**: Observer watches agent activity and emits events for UI display
+2. **Execution**: Factories can be executed by the agent via the `execute_factory` tool

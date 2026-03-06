@@ -15,6 +15,9 @@ from hermes_cli.auth import (
 from hermes_cli.config import load_config
 from hermes_constants import OPENROUTER_BASE_URL
 
+# Anthropic direct API base URL
+ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
+
 
 def _get_model_config() -> Dict[str, Any]:
     config = load_config()
@@ -90,6 +93,27 @@ def _resolve_openrouter_runtime(
     }
 
 
+def _resolve_anthropic_runtime(
+    *,
+    explicit_api_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Resolve Anthropic direct API credentials.
+    
+    Uses ANTHROPIC_API_KEY for direct API access. Note that direct Anthropic
+    API access loses some features that depend on OpenRouter (e.g., TTS via
+    other models), but provides core agent functionality.
+    """
+    api_key = explicit_api_key or os.getenv("ANTHROPIC_API_KEY", "")
+    
+    return {
+        "provider": "anthropic",
+        "api_mode": "chat_completions",  # We use OpenAI-compatible wrapper
+        "base_url": ANTHROPIC_BASE_URL,
+        "api_key": api_key,
+        "source": "explicit" if explicit_api_key else "env",
+    }
+
+
 def resolve_runtime_provider(
     *,
     requested: Optional[str] = None,
@@ -131,6 +155,12 @@ def resolve_runtime_provider(
             "last_refresh": creds.get("last_refresh"),
             "requested_provider": requested_provider,
         }
+
+    # Check for Anthropic direct API
+    if provider == "anthropic":
+        runtime = _resolve_anthropic_runtime(explicit_api_key=explicit_api_key)
+        runtime["requested_provider"] = requested_provider
+        return runtime
 
     runtime = _resolve_openrouter_runtime(
         requested_provider=requested_provider,

@@ -354,13 +354,16 @@ def resolve_provider(
     Priority (when requested="auto" or None):
     1. active_provider in auth.json with valid credentials
     2. Explicit CLI api_key/base_url -> "openrouter"
-    3. OPENAI_API_KEY or OPENROUTER_API_KEY env vars -> "openrouter"
-    4. Fallback: "openrouter"
+    3. ANTHROPIC_API_KEY env var -> "anthropic"
+    4. OPENAI_API_KEY or OPENROUTER_API_KEY env vars -> "openrouter"
+    5. Fallback: "openrouter"
     """
     normalized = (requested or "auto").strip().lower()
 
     if normalized in {"openrouter", "custom"}:
         return "openrouter"
+    if normalized == "anthropic":
+        return "anthropic"
     if normalized in PROVIDER_REGISTRY:
         return normalized
     if normalized != "auto":
@@ -383,6 +386,10 @@ def resolve_provider(
                 return active
     except Exception as e:
         logger.debug("Could not detect active auth provider: %s", e)
+
+    # Check for Anthropic direct API key
+    if os.getenv("ANTHROPIC_API_KEY"):
+        return "anthropic"
 
     if os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY"):
         return "openrouter"

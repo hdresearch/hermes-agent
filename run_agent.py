@@ -209,13 +209,8 @@ class AIAgent:
             self.provider = "openai-codex"
         else:
             self.api_mode = "chat_completions"
-        if base_url and "api.anthropic.com" in base_url.strip().lower():
-            raise ValueError(
-                "Anthropic's native /v1/messages API is not supported yet (planned for a future release). "
-                "Hermes currently requires OpenAI-compatible /chat/completions endpoints. "
-                "To use Claude models now, route through OpenRouter (OPENROUTER_API_KEY) "
-                "or any OpenAI-compatible proxy that wraps the Anthropic API."
-            )
+        # Anthropic direct API is now supported via the AnthropicOpenAIWrapper
+        # No need to raise an error - the client initialization handles it
         self.tool_progress_callback = tool_progress_callback
         self.clarify_callback = clarify_callback
         self.step_callback = step_callback
@@ -321,46 +316,70 @@ class AIAgent:
                 ]:
                     logging.getLogger(quiet_logger).setLevel(logging.ERROR)
         
-        # Initialize OpenAI client - defaults to OpenRouter
+        # Initialize client - supports OpenRouter, OpenAI, or Anthropic direct
         client_kwargs = {}
+        self._use_anthropic_client = False
         
-        # Default to OpenRouter if no base_url provided
-        if base_url:
-            client_kwargs["base_url"] = base_url
+        # Check if using Anthropic direct API
+        if self.provider == "anthropic" or (base_url and "api.anthropic.com" in base_url.lower()):
+            self._use_anthropic_client = True
+            anthropic_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
+            client_kwargs["api_key"] = anthropic_key
+            self._client_kwargs = client_kwargs
+            try:
+                from tools.anthropic_client import AnthropicOpenAIWrapper
+                self.client = AnthropicOpenAIWrapper(api_key=anthropic_key)
+                if not self.quiet_mode:
+                    print(f"🤖 AI Agent initialized with model: {self.model}")
+                    print(f"🔗 Using Anthropic direct API")
+                    if anthropic_key and len(anthropic_key) > 12:
+                        print(f"🔑 Using API key: {anthropic_key[:8]}...{anthropic_key[-4:]}")
+                    print(f"⚠️  Note: Direct Anthropic API loses text-to-voice features")
+            except ImportError as e:
+                raise RuntimeError(
+                    f"Failed to initialize Anthropic client: {e}. "
+                    "Install anthropic package: pip install anthropic"
+                )
+            except Exception as e:
+                raise RuntimeError(f"Failed to initialize Anthropic client: {e}")
         else:
-            client_kwargs["base_url"] = OPENROUTER_BASE_URL
-        
-        # Handle API key - OpenRouter is the primary provider
-        if api_key:
-            client_kwargs["api_key"] = api_key
-        else:
-            # Primary: OPENROUTER_API_KEY, fallback to direct provider keys
-            client_kwargs["api_key"] = os.getenv("OPENROUTER_API_KEY", "")
-        
-        # OpenRouter app attribution — shows hermes-agent in rankings/analytics
-        effective_base = client_kwargs.get("base_url", "")
-        if "openrouter" in effective_base.lower():
-            client_kwargs["default_headers"] = {
-                "HTTP-Referer": "https://github.com/NousResearch/hermes-agent",
-                "X-OpenRouter-Title": "Hermes Agent",
-                "X-OpenRouter-Categories": "productivity,cli-agent",
-            }
-        
-        self._client_kwargs = client_kwargs  # stored for rebuilding after interrupt
-        try:
-            self.client = OpenAI(**client_kwargs)
-            if not self.quiet_mode:
-                print(f"🤖 AI Agent initialized with model: {self.model}")
-                if base_url:
-                    print(f"🔗 Using custom base URL: {base_url}")
-                # Always show API key info (masked) for debugging auth issues
-                key_used = client_kwargs.get("api_key", "none")
-                if key_used and key_used != "dummy-key" and len(key_used) > 12:
-                    print(f"🔑 Using API key: {key_used[:8]}...{key_used[-4:]}")
-                else:
-                    print(f"⚠️  Warning: API key appears invalid or missing (got: '{key_used[:20] if key_used else 'none'}...')")
-        except Exception as e:
-            raise RuntimeError(f"Failed to initialize OpenAI client: {e}")
+            # Default to OpenRouter/OpenAI-compatible endpoint
+            if base_url:
+                client_kwargs["base_url"] = base_url
+            else:
+                client_kwargs["base_url"] = OPENROUTER_BASE_URL
+            
+            # Handle API key - OpenRouter is the primary provider
+            if api_key:
+                client_kwargs["api_key"] = api_key
+            else:
+                # Primary: OPENROUTER_API_KEY, fallback to direct provider keys
+                client_kwargs["api_key"] = os.getenv("OPENROUTER_API_KEY", "")
+            
+            # OpenRouter app attribution — shows hermes-agent in rankings/analytics
+            effective_base = client_kwargs.get("base_url", "")
+            if "openrouter" in effective_base.lower():
+                client_kwargs["default_headers"] = {
+                    "HTTP-Referer": "https://github.com/NousResearch/hermes-agent",
+                    "X-OpenRouter-Title": "Hermes Agent",
+                    "X-OpenRouter-Categories": "productivity,cli-agent",
+                }
+            
+            self._client_kwargs = client_kwargs  # stored for rebuilding after interrupt
+            try:
+                self.client = OpenAI(**client_kwargs)
+                if not self.quiet_mode:
+                    print(f"🤖 AI Agent initialized with model: {self.model}")
+                    if base_url:
+                        print(f"🔗 Using custom base URL: {base_url}")
+                    # Always show API key info (masked) for debugging auth issues
+                    key_used = client_kwargs.get("api_key", "none")
+                    if key_used and key_used != "dummy-key" and len(key_used) > 12:
+                        print(f"🔑 Using API key: {key_used[:8]}...{key_used[-4:]}")
+                    else:
+                        print(f"⚠️  Warning: API key appears invalid or missing (got: '{key_used[:20] if key_used else 'none'}...')")
+            except Exception as e:
+                raise RuntimeError(f"Failed to initialize OpenAI client: {e}")
         
         # Get available tools with filtering
         self.tools = get_tool_definitions(

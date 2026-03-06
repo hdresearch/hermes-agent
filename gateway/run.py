@@ -527,6 +527,13 @@ class GatewayRunner:
                 return None
             return HomeAssistantAdapter(config)
 
+        elif platform == Platform.IMESSAGE:
+            from gateway.platforms.imessage import IMessageAdapter, check_imessage_requirements
+            if not check_imessage_requirements():
+                logger.warning("iMessage: macOS with osascript required")
+                return None
+            return IMessageAdapter(config)
+
         return None
     
     def _is_user_authorized(self, source: SessionSource) -> bool:

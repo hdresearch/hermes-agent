@@ -260,11 +260,17 @@ TOOLSETS = {
         "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
+    
+    "hermes-imessage": {
+        "description": "iMessage bot toolset - macOS Messages.app integration via AppleScript",
+        "tools": _HERMES_CORE_TOOLS,
+        "includes": []
+    },
 
     "hermes-gateway": {
         "description": "Gateway toolset - union of all messaging platform tools",
         "tools": [],
-        "includes": ["hermes-telegram", "hermes-discord", "hermes-whatsapp", "hermes-slack", "hermes-homeassistant"]
+        "includes": ["hermes-telegram", "hermes-discord", "hermes-whatsapp", "hermes-slack", "hermes-homeassistant", "hermes-imessage"]
     }
 }
 

@@ -169,6 +169,14 @@ OPTIONAL_ENV_VARS = {
         "category": "provider",
         "advanced": True,
     },
+    "ANTHROPIC_API_KEY": {
+        "description": "Anthropic API key for direct Claude access (loses TTS/voice features but works for general agent)",
+        "prompt": "Anthropic API key",
+        "url": "https://console.anthropic.com/settings/keys",
+        "password": True,
+        "tools": [],
+        "category": "provider",
+    },
 
     # ── Tool API keys ──
     "FIRECRAWL_API_KEY": {
@@ -306,6 +314,28 @@ OPTIONAL_ENV_VARS = {
     "GATEWAY_ALLOW_ALL_USERS": {
         "description": "Allow all users to interact with messaging bots (true/false). Default: false.",
         "prompt": "Allow all users (true/false)",
+        "url": None,
+        "password": False,
+        "category": "messaging",
+        "advanced": True,
+    },
+    "IMESSAGE_ENABLED": {
+        "description": "Enable iMessage integration (macOS only, uses AppleScript)",
+        "prompt": "Enable iMessage (true/false)",
+        "url": None,
+        "password": False,
+        "category": "messaging",
+    },
+    "IMESSAGE_ALLOWED_SENDERS": {
+        "description": "Comma-separated phone numbers/emails allowed to message the bot",
+        "prompt": "Allowed iMessage senders (comma-separated)",
+        "url": None,
+        "password": False,
+        "category": "messaging",
+    },
+    "IMESSAGE_POLL_INTERVAL": {
+        "description": "How often to check for new iMessages (seconds, default: 2)",
+        "prompt": "Poll interval (seconds)",
         "url": None,
         "password": False,
         "category": "messaging",
