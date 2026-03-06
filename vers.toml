@@ -1,0 +1,11 @@
+[project]
+name = "hermes-agent"
+
+[build]
+dockerfile = "Dockerfile.vers"
+
+[vm]
+vcpu_count = 4
+mem_size = 4096
+fs_size_vm = 8192
+kernel = "default.bin"
