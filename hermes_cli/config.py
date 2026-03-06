@@ -227,6 +227,14 @@ OPTIONAL_ENV_VARS = {
         "password": True,
         "category": "tool",
     },
+    "VERS_API_KEY": {
+        "description": "Vers API key for cloud VM execution (terminal backend: vers)",
+        "prompt": "Vers API key",
+        "url": "https://vers.sh/",
+        "tools": ["terminal"],
+        "password": True,
+        "category": "tool",
+    },
     "WANDB_API_KEY": {
         "description": "Weights & Biases API key for experiment tracking",
         "prompt": "WandB API key",

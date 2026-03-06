@@ -334,6 +334,7 @@ from tools.environments.singularity import SingularityEnvironment as _Singularit
 from tools.environments.ssh import SSHEnvironment as _SSHEnvironment
 from tools.environments.docker import DockerEnvironment as _DockerEnvironment
 from tools.environments.modal import ModalEnvironment as _ModalEnvironment
+from tools.environments.vers import VersEnvironment as _VersEnvironment
 
 
 # Tool description for LLM
@@ -523,8 +524,21 @@ def _create_environment(env_type: str, image: str, cwd: str, timeout: int,
             timeout=timeout,
         )
     
+    elif env_type == "vers":
+        vers_config = container_config or {}
+        return _VersEnvironment(
+            cwd=cwd,
+            timeout=timeout,
+            api_key=os.getenv("VERS_API_KEY"),
+            vm_id=vers_config.get("vers_vm_id"),
+            vcpu=vers_config.get("vers_vcpu", 4),
+            memory=vers_config.get("vers_memory", 4096),
+            disk=vers_config.get("vers_disk", 8192),
+            task_id=task_id,
+        )
+    
     else:
-        raise ValueError(f"Unknown environment type: {env_type}. Use 'local', 'docker', 'singularity', 'modal', or 'ssh'")
+        raise ValueError(f"Unknown environment type: {env_type}. Use 'local', 'docker', 'singularity', 'modal', 'ssh', or 'vers'")
 
 
 def _cleanup_inactive_envs(lifetime_seconds: int = 300):

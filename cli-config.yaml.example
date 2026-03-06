@@ -116,8 +116,24 @@ terminal:
 #   timeout: 180
 #   lifetime_seconds: 300
 #   modal_image: "nikolaik/python-nodejs:python3.11-nodejs20"
+
+# -----------------------------------------------------------------------------
+# OPTION 6: Vers cloud VMs
+# Commands run in Vers cloud VMs with persistent state
+# Great for: Long-running tasks, persistent environments, public URLs
+# Requires: VERS_API_KEY in .env, vers CLI installed
+# -----------------------------------------------------------------------------
+# terminal:
+#   backend: "vers"
+#   cwd: "/root"  # Path INSIDE the VM
+#   timeout: 180
+#   lifetime_seconds: 600
+#   vers_vm_id: ""  # Optional: reuse existing VM (leave empty to auto-create)
+#   vers_vcpu: 4
+#   vers_memory: 4096  # MiB
+#   vers_disk: 8192    # MiB
 #
-# --- Container resource limits (docker, singularity, modal -- ignored for local/ssh) ---
+# --- Container resource limits (docker, singularity, modal, vers -- ignored for local/ssh) ---
 # These settings apply to all container backends. They control the resources
 # allocated to the sandbox and whether its filesystem persists across sessions.
   container_cpu: 1              # CPU cores
