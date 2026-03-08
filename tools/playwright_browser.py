@@ -97,10 +97,10 @@ def playwright_browser(action: str, url: str = None, selector: str = None, text:
             if not url:
                 return json.dumps({"error": "url parameter required for navigate action"})
             
-            # Escape the URL for shell
-            safe_url = url.replace("'", "'\\''")
+            # Escape the URL for shell - use double quotes inside the script
+            safe_url = url.replace('"', '\\"')
             
-            # Python script to navigate and get content
+            # Python script to navigate and get content - use double quotes for strings
             script = f'''
 import json
 import sys
@@ -110,11 +110,11 @@ try:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        page.goto('{safe_url}', timeout=30000)
-        page.wait_for_load_state('domcontentloaded')
+        page.goto("{safe_url}", timeout=30000)
+        page.wait_for_load_state("domcontentloaded")
         
         title = page.title()
-        text = page.inner_text('body')[:15000]
+        text = page.inner_text("body")[:15000]
         
         result = {{"success": True, "title": title, "url": page.url, "content": text}}
         print("RESULT_START" + json.dumps(result) + "RESULT_END")
