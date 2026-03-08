@@ -148,6 +148,12 @@ TOOLSETS = {
         "includes": []
     },
     
+    "github": {
+        "description": "GitHub repository operations via gh CLI",
+        "tools": ["github_repo"],
+        "includes": []
+    },
+    
     "cronjob": {
         "description": "Cronjob management tools - schedule, list, and remove automated tasks",
         "tools": ["schedule_cronjob", "list_cronjobs", "remove_cronjob"],
