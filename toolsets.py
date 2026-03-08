@@ -130,6 +130,24 @@ TOOLSETS = {
         "includes": []
     },
     
+    "imessage": {
+        "description": "iMessage read-only operations on macOS (list chats, read messages, search)",
+        "tools": ["imessage_read"],
+        "includes": []
+    },
+    
+    "imessage_write": {
+        "description": "iMessage send/write operations on macOS (⚠️ sends real messages)",
+        "tools": ["imessage_send"],
+        "includes": []
+    },
+    
+    "imessage_full": {
+        "description": "Full iMessage access - read and write operations",
+        "tools": ["imessage_read", "imessage_send"],
+        "includes": []
+    },
+    
     "cronjob": {
         "description": "Cronjob management tools - schedule, list, and remove automated tasks",
         "tools": ["schedule_cronjob", "list_cronjobs", "remove_cronjob"],

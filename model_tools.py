@@ -98,6 +98,7 @@ def _discover_tools():
         "tools.shapez_tool",
         "tools.gemini_search_tool",
         "tools.playwright_browser",
+        "tools.imessage_tool",
     ]
     import importlib
     for mod_name in _modules:
