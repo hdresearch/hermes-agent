@@ -1,6 +1,8 @@
 """GitHub tool for repository management.
 
-Uses the gh CLI for GitHub operations. Requires GITHUB_TOKEN or gh auth login.
+Uses the gh CLI for GitHub operations. Can run locally or in an Apple Container.
+
+Requires GITHUB_TOKEN or GITHUB_API_KEY environment variable.
 
 Available operations:
 - List/create/close issues
@@ -20,15 +22,17 @@ from tools.registry import registry
 
 logger = logging.getLogger(__name__)
 
+# Singleton Apple Container for GitHub operations
+_github_container = None
+
 
 def check_github_requirements() -> bool:
     """Check if GitHub token is available."""
     return bool(os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_API_KEY"))
 
 
-def _run_gh_command(args: list, timeout: int = 30) -> dict:
-    """Run a gh CLI command and return the result."""
-    # Set up environment with token
+def _run_gh_command_local(args: list, timeout: int = 30) -> dict:
+    """Run a gh CLI command locally and return the result."""
     env = os.environ.copy()
     token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_API_KEY")
     if token:
@@ -55,8 +59,55 @@ def _run_gh_command(args: list, timeout: int = 30) -> dict:
         return {"output": "", "error": str(e), "returncode": 1}
 
 
+def _run_gh_command_container(args: list, timeout: int = 30) -> dict:
+    """Run a gh CLI command in an Apple Container and return the result."""
+    global _github_container
+    
+    try:
+        from tools.environments.apple_container import AppleContainerEnvironment
+        
+        if _github_container is None:
+            _github_container = AppleContainerEnvironment(
+                cwd="/root",
+                timeout=timeout,
+                image="ghcr.io/hdresearch/hermes-github-admin:latest",
+                container_name="hermes-github-admin",
+                task_id="github",
+                inherit_env=["GITHUB_TOKEN", "GITHUB_API_KEY", "GH_TOKEN"],
+            )
+        
+        # Build the gh command
+        gh_cmd = "gh " + " ".join(f'"{arg}"' if " " in arg else arg for arg in args)
+        
+        result = _github_container.execute(gh_cmd, timeout=timeout)
+        
+        output = result.get("output", "").strip()
+        returncode = result.get("returncode", 1)
+        
+        return {
+            "output": output,
+            "error": output if returncode != 0 else None,
+            "returncode": returncode,
+        }
+        
+    except Exception as e:
+        logger.exception(f"Apple Container error: {e}")
+        # Fall back to local execution
+        logger.info("Falling back to local gh execution")
+        return _run_gh_command_local(args, timeout)
+
+
+def _run_gh_command(args: list, timeout: int = 30, use_container: bool = False) -> dict:
+    """Run a gh CLI command, optionally in an Apple Container."""
+    if use_container:
+        return _run_gh_command_container(args, timeout)
+    else:
+        return _run_gh_command_local(args, timeout)
+
+
 def github_repo(action: str, repo: str, title: str = None, body: str = None, 
-                number: int = None, labels: str = None, task_id: str = None) -> str:
+                number: int = None, labels: str = None, use_container: bool = False,
+                task_id: str = None) -> str:
     """
     GitHub repository operations.
     
@@ -74,7 +125,7 @@ def github_repo(action: str, repo: str, title: str = None, body: str = None,
     """
     try:
         if action == "view":
-            result = _run_gh_command(["repo", "view", repo, "--json", "name,description,url,stargazerCount,forkCount,hasIssuesEnabled"])
+            result = _run_gh_command(["repo", "view", repo, "--json", "name,description,url,stargazerCount,forkCount,hasIssuesEnabled"], use_container=use_container)
             if result.get("error"):
                 return json.dumps({"error": result["error"]})
             try:
@@ -83,7 +134,7 @@ def github_repo(action: str, repo: str, title: str = None, body: str = None,
                 return json.dumps({"output": result["output"]})
                 
         elif action == "issues":
-            result = _run_gh_command(["issue", "list", "-R", repo, "--json", "number,title,state,author,labels", "--limit", "20"])
+            result = _run_gh_command(["issue", "list", "-R", repo, "--json", "number,title,state,author,labels", "--limit", "20"], use_container=use_container)
             if result.get("error"):
                 return json.dumps({"error": result["error"]})
             return result["output"] or json.dumps({"issues": []})
@@ -98,7 +149,7 @@ def github_repo(action: str, repo: str, title: str = None, body: str = None,
                 args.extend(["--body", ""])
             if labels:
                 args.extend(["--label", labels])
-            result = _run_gh_command(args)
+            result = _run_gh_command(args, use_container=use_container)
             if result.get("error"):
                 return json.dumps({"error": result["error"]})
             return json.dumps({"success": True, "message": result["output"]})
@@ -106,7 +157,7 @@ def github_repo(action: str, repo: str, title: str = None, body: str = None,
         elif action == "issue_view":
             if not number:
                 return json.dumps({"error": "number parameter required for issue_view"})
-            result = _run_gh_command(["issue", "view", str(number), "-R", repo, "--json", "number,title,body,state,author,labels,comments"])
+            result = _run_gh_command(["issue", "view", str(number), "-R", repo, "--json", "number,title,body,state,author,labels,comments"], use_container=use_container)
             if result.get("error"):
                 return json.dumps({"error": result["error"]})
             return result["output"]
@@ -114,13 +165,13 @@ def github_repo(action: str, repo: str, title: str = None, body: str = None,
         elif action == "issue_close":
             if not number:
                 return json.dumps({"error": "number parameter required for issue_close"})
-            result = _run_gh_command(["issue", "close", str(number), "-R", repo])
+            result = _run_gh_command(["issue", "close", str(number), "-R", repo], use_container=use_container)
             if result.get("error"):
                 return json.dumps({"error": result["error"]})
             return json.dumps({"success": True, "message": f"Issue #{number} closed"})
             
         elif action == "prs":
-            result = _run_gh_command(["pr", "list", "-R", repo, "--json", "number,title,state,author,headRefName"])
+            result = _run_gh_command(["pr", "list", "-R", repo, "--json", "number,title,state,author,headRefName"], use_container=use_container)
             if result.get("error"):
                 return json.dumps({"error": result["error"]})
             return result["output"] or json.dumps({"prs": []})
@@ -128,7 +179,7 @@ def github_repo(action: str, repo: str, title: str = None, body: str = None,
         elif action == "pr_view":
             if not number:
                 return json.dumps({"error": "number parameter required for pr_view"})
-            result = _run_gh_command(["pr", "view", str(number), "-R", repo, "--json", "number,title,body,state,author,mergeable,commits"])
+            result = _run_gh_command(["pr", "view", str(number), "-R", repo, "--json", "number,title,body,state,author,mergeable,commits"], use_container=use_container)
             if result.get("error"):
                 return json.dumps({"error": result["error"]})
             return result["output"]
@@ -136,13 +187,13 @@ def github_repo(action: str, repo: str, title: str = None, body: str = None,
         elif action == "pr_merge":
             if not number:
                 return json.dumps({"error": "number parameter required for pr_merge"})
-            result = _run_gh_command(["pr", "merge", str(number), "-R", repo, "--merge"])
+            result = _run_gh_command(["pr", "merge", str(number), "-R", repo, "--merge"], use_container=use_container)
             if result.get("error"):
                 return json.dumps({"error": result["error"]})
             return json.dumps({"success": True, "message": f"PR #{number} merged"})
             
         elif action == "labels":
-            result = _run_gh_command(["label", "list", "-R", repo, "--json", "name,description,color"])
+            result = _run_gh_command(["label", "list", "-R", repo, "--json", "name,description,color"], use_container=use_container)
             if result.get("error"):
                 return json.dumps({"error": result["error"]})
             return result["output"] or json.dumps({"labels": []})
@@ -153,7 +204,7 @@ def github_repo(action: str, repo: str, title: str = None, body: str = None,
             args = ["label", "create", title, "-R", repo]
             if body:
                 args.extend(["--description", body])
-            result = _run_gh_command(args)
+            result = _run_gh_command(args, use_container=use_container)
             if result.get("error"):
                 return json.dumps({"error": result["error"]})
             return json.dumps({"success": True, "message": f"Label '{title}' created"})
@@ -164,6 +215,17 @@ def github_repo(action: str, repo: str, title: str = None, body: str = None,
     except Exception as e:
         logger.exception(f"GitHub tool error: {e}")
         return json.dumps({"error": str(e)})
+
+
+def cleanup_github_container():
+    """Cleanup the GitHub Apple Container."""
+    global _github_container
+    if _github_container:
+        try:
+            _github_container.cleanup()
+        except Exception as e:
+            logger.warning(f"Failed to cleanup GitHub container: {e}")
+        _github_container = None
 
 
 # Register the tool
@@ -232,6 +294,27 @@ registry.register(
         body=args.get("body"),
         number=args.get("number"),
         labels=args.get("labels"),
+        use_container=False,  # Default to local for direct tool use
+        task_id=kw.get("task_id"),
+    ),
+    check_fn=check_github_requirements,
+    requires_env=["GITHUB_TOKEN"],
+)
+
+# Also register a container version
+registry.register(
+    name="github_repo_container",
+    toolset="github_container",
+    schema={**GITHUB_REPO_SCHEMA, "name": "github_repo_container", 
+            "description": GITHUB_REPO_SCHEMA["description"].replace("gh CLI", "gh CLI in Apple Container")},
+    handler=lambda args, **kw: github_repo(
+        action=args.get("action", ""),
+        repo=args.get("repo", ""),
+        title=args.get("title"),
+        body=args.get("body"),
+        number=args.get("number"),
+        labels=args.get("labels"),
+        use_container=True,  # Use Apple Container
         task_id=kw.get("task_id"),
     ),
     check_fn=check_github_requirements,

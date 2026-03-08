@@ -149,8 +149,14 @@ TOOLSETS = {
     },
     
     "github": {
-        "description": "GitHub repository operations via gh CLI",
+        "description": "GitHub repository operations via gh CLI (local)",
         "tools": ["github_repo"],
+        "includes": []
+    },
+    
+    "github_container": {
+        "description": "GitHub repository operations via gh CLI in Apple Container (sandboxed)",
+        "tools": ["github_repo_container"],
         "includes": []
     },
     
