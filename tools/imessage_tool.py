@@ -1,6 +1,6 @@
 """iMessage tool for reading and sending messages on macOS.
 
-Uses AppleScript and the Messages SQLite database for read operations.
+Uses the Messages SQLite database for read operations.
 Send operations use AppleScript to send messages via Messages.app.
 
 Requires:
@@ -54,44 +54,35 @@ def _run_sqlite_query(query: str) -> dict:
     
     try:
         result = subprocess.run(
-            ["sqlite3", "-json", db_path, query],
+            ["sqlite3", "-header", "-separator", "|", db_path, query],
             capture_output=True,
             text=True,
             timeout=30,
         )
         
         if result.returncode != 0:
-            # Try without -json flag for older sqlite versions
-            result = subprocess.run(
-                ["sqlite3", "-header", "-separator", "|", db_path, query],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            
-            if result.returncode != 0:
-                return {"error": result.stderr.strip()}
-            
-            # Parse pipe-separated output
-            lines = result.stdout.strip().split("\n")
-            if len(lines) < 2:
-                return {"rows": [], "columns": []}
-            
-            columns = lines[0].split("|")
-            rows = []
-            for line in lines[1:]:
-                values = line.split("|")
-                rows.append(dict(zip(columns, values)))
-            
-            return {"rows": rows, "columns": columns}
+            return {"error": result.stderr.strip()}
         
-        # Parse JSON output
-        import json as json_module
-        try:
-            rows = json_module.loads(result.stdout) if result.stdout.strip() else []
-            return {"rows": rows}
-        except:
-            return {"output": result.stdout.strip()}
+        output = result.stdout.strip()
+        if not output:
+            return {"rows": [], "columns": []}
+        
+        # Parse pipe-separated output
+        lines = output.split("\n")
+        if len(lines) < 1:
+            return {"rows": [], "columns": []}
+        
+        columns = lines[0].split("|")
+        rows = []
+        for line in lines[1:]:
+            if line.strip():
+                values = line.split("|")
+                # Pad values if needed
+                while len(values) < len(columns):
+                    values.append("")
+                rows.append(dict(zip(columns, values)))
+        
+        return {"rows": rows, "columns": columns}
             
     except subprocess.TimeoutExpired:
         return {"error": "Query timed out"}
@@ -107,23 +98,20 @@ def imessage_read(action: str, contact: str = None, limit: int = 10, search: str
     - list_chats: List recent conversations
     - read_messages: Read messages from a specific contact (requires contact)
     - search_messages: Search messages by text (requires search)
+    - recent_messages: Get most recent messages across all chats
     """
     try:
         if action == "list_chats":
-            # Get recent chats from the database
-            query = """
-                SELECT 
-                    chat.chat_identifier,
-                    chat.display_name,
-                    MAX(message.date) as last_message_date,
-                    COUNT(message.rowid) as message_count
-                FROM chat
-                LEFT JOIN chat_message_join ON chat.rowid = chat_message_join.chat_id
-                LEFT JOIN message ON chat_message_join.message_id = message.rowid
-                GROUP BY chat.rowid
-                ORDER BY last_message_date DESC
+            # Get recent chats
+            query = f"""
+                SELECT DISTINCT
+                    c.chat_identifier as contact,
+                    c.display_name as name,
+                    (SELECT COUNT(*) FROM chat_message_join cmj WHERE cmj.chat_id = c.ROWID) as message_count
+                FROM chat c
+                ORDER BY c.ROWID DESC
                 LIMIT {limit};
-            """.format(limit=limit)
+            """
             
             result = _run_sqlite_query(query)
             
@@ -145,17 +133,15 @@ def imessage_read(action: str, contact: str = None, limit: int = 10, search: str
             
             query = f"""
                 SELECT 
-                    message.text,
-                    message.is_from_me,
-                    datetime(message.date/1000000000 + 978307200, 'unixepoch', 'localtime') as timestamp,
-                    handle.id as sender
-                FROM message
-                JOIN chat_message_join ON message.rowid = chat_message_join.message_id
-                JOIN chat ON chat_message_join.chat_id = chat.rowid
-                LEFT JOIN handle ON message.handle_id = handle.rowid
-                WHERE chat.chat_identifier LIKE '%{safe_contact}%'
-                   OR chat.display_name LIKE '%{safe_contact}%'
-                ORDER BY message.date DESC
+                    m.text as message,
+                    CASE WHEN m.is_from_me = 1 THEN 'me' ELSE c.chat_identifier END as sender,
+                    datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') as timestamp
+                FROM message m
+                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+                JOIN chat c ON cmj.chat_id = c.ROWID
+                WHERE (c.chat_identifier LIKE '%{safe_contact}%' OR c.display_name LIKE '%{safe_contact}%')
+                  AND m.text IS NOT NULL AND m.text != ''
+                ORDER BY m.date DESC
                 LIMIT {limit};
             """
             
@@ -179,17 +165,14 @@ def imessage_read(action: str, contact: str = None, limit: int = 10, search: str
             
             query = f"""
                 SELECT 
-                    message.text,
-                    message.is_from_me,
-                    datetime(message.date/1000000000 + 978307200, 'unixepoch', 'localtime') as timestamp,
-                    chat.chat_identifier,
-                    handle.id as sender
-                FROM message
-                JOIN chat_message_join ON message.rowid = chat_message_join.message_id
-                JOIN chat ON chat_message_join.chat_id = chat.rowid
-                LEFT JOIN handle ON message.handle_id = handle.rowid
-                WHERE message.text LIKE '%{safe_search}%'
-                ORDER BY message.date DESC
+                    m.text as message,
+                    CASE WHEN m.is_from_me = 1 THEN 'me' ELSE c.chat_identifier END as sender,
+                    datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') as timestamp
+                FROM message m
+                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+                JOIN chat c ON cmj.chat_id = c.ROWID
+                WHERE m.text LIKE '%{safe_search}%'
+                ORDER BY m.date DESC
                 LIMIT {limit};
             """
             
@@ -205,8 +188,34 @@ def imessage_read(action: str, contact: str = None, limit: int = 10, search: str
                 "messages": result.get("rows", [])
             })
             
+        elif action == "recent_messages":
+            # Get most recent messages across all chats
+            query = f"""
+                SELECT 
+                    m.text as message,
+                    CASE WHEN m.is_from_me = 1 THEN 'me' ELSE c.chat_identifier END as sender,
+                    datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') as timestamp
+                FROM message m
+                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+                JOIN chat c ON cmj.chat_id = c.ROWID
+                WHERE m.text IS NOT NULL AND m.text != ''
+                ORDER BY m.date DESC
+                LIMIT {limit};
+            """
+            
+            result = _run_sqlite_query(query)
+            
+            if "error" in result:
+                return json.dumps({"error": result["error"]})
+            
+            return json.dumps({
+                "success": True,
+                "action": "recent_messages",
+                "messages": result.get("rows", [])
+            })
+            
         else:
-            return json.dumps({"error": f"Unknown action: {action}. Use: list_chats, read_messages, search_messages"})
+            return json.dumps({"error": f"Unknown action: {action}. Use: list_chats, read_messages, search_messages, recent_messages"})
             
     except Exception as e:
         logger.exception(f"iMessage read error: {e}")
@@ -215,7 +224,7 @@ def imessage_read(action: str, contact: str = None, limit: int = 10, search: str
 
 def imessage_send(recipient: str, message: str, task_id: str = None) -> str:
     """
-    Send an iMessage (WRITE operation).
+    Send an iMessage using AppleScript (WRITE operation).
     
     Uses AppleScript to send a message via Messages.app.
     The recipient can be a phone number or email address.
@@ -224,31 +233,42 @@ def imessage_send(recipient: str, message: str, task_id: str = None) -> str:
     """
     try:
         # Escape for AppleScript
-        safe_recipient = recipient.replace('"', '\\"')
-        safe_message = message.replace('"', '\\"').replace('\n', '\\n')
+        safe_recipient = recipient.replace('"', '\\"').replace("'", "\\'")
+        safe_message = message.replace('"', '\\"').replace("'", "\\'").replace('\n', '\\n')
         
+        # Use buddy identifier approach for more reliable sending
         script = f'''
-            tell application "Messages"
-                set targetService to 1st account whose service type = iMessage
-                set targetBuddy to participant "{safe_recipient}" of targetService
-                send "{safe_message}" to targetBuddy
-            end tell
-        '''
+tell application "Messages"
+    set targetBuddy to buddy "{safe_recipient}" of (service 1 whose service type is iMessage)
+    send "{safe_message}" to targetBuddy
+end tell
+'''
         
         result = _run_osascript(script)
         
         if result.get("error"):
-            return json.dumps({
-                "success": False,
-                "error": result["error"]
-            })
+            # Try alternative approach
+            script_alt = f'''
+tell application "Messages"
+    set targetService to 1st account whose service type = iMessage
+    set targetBuddy to participant "{safe_recipient}" of targetService
+    send "{safe_message}" to targetBuddy
+end tell
+'''
+            result = _run_osascript(script_alt)
+            
+            if result.get("error"):
+                return json.dumps({
+                    "success": False,
+                    "error": result["error"]
+                })
         
         return json.dumps({
             "success": True,
             "action": "send",
             "recipient": recipient,
             "message": message,
-            "status": "Message sent"
+            "status": "Message sent via AppleScript"
         })
         
     except Exception as e:
@@ -259,23 +279,25 @@ def imessage_send(recipient: str, message: str, task_id: str = None) -> str:
 # Register READ tool
 IMESSAGE_READ_SCHEMA = {
     "name": "imessage_read",
-    "description": """Read iMessage data on macOS (READ-ONLY).
+    "description": """Read iMessage data on macOS (READ-ONLY). Reads from the Messages SQLite database.
 
 Actions:
-- list_chats: List recent conversations
-- read_messages: Read messages from a contact (requires 'contact' parameter)
+- list_chats: List recent conversations with contact info
+- read_messages: Read messages from a specific contact (requires 'contact' parameter)
 - search_messages: Search messages by text (requires 'search' parameter)
+- recent_messages: Get most recent messages across all chats
 
 Examples:
 - {"action": "list_chats", "limit": 10}
 - {"action": "read_messages", "contact": "+1234567890", "limit": 20}
-- {"action": "search_messages", "search": "meeting tomorrow"}""",
+- {"action": "search_messages", "search": "meeting tomorrow"}
+- {"action": "recent_messages", "limit": 5}""",
     "parameters": {
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["list_chats", "read_messages", "search_messages"],
+                "enum": ["list_chats", "read_messages", "search_messages", "recent_messages"],
                 "description": "The read action to perform"
             },
             "contact": {
@@ -296,15 +318,15 @@ Examples:
     }
 }
 
-# Register SEND tool (write operation)
+# Register SEND tool (write operation via AppleScript)
 IMESSAGE_SEND_SCHEMA = {
     "name": "imessage_send",
-    "description": """Send an iMessage on macOS (WRITE operation).
+    "description": """Send an iMessage on macOS using AppleScript (WRITE operation).
 
-⚠️ This sends a real message - use with caution!
+⚠️ This sends a real message via Messages.app - use with caution!
 
 Parameters:
-- recipient: Phone number or email address
+- recipient: Phone number or email address (e.g., "+1234567890" or "user@example.com")
 - message: Text message to send
 
 Example: {"recipient": "+1234567890", "message": "Hello!"}""",
