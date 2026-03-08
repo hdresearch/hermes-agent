@@ -124,6 +124,12 @@ TOOLSETS = {
         "includes": []
     },
     
+    "playwright": {
+        "description": "Playwright browser automation via Vers VM (no Browserbase required)",
+        "tools": ["playwright_browser"],
+        "includes": []
+    },
+    
     "cronjob": {
         "description": "Cronjob management tools - schedule, list, and remove automated tasks",
         "tools": ["schedule_cronjob", "list_cronjobs", "remove_cronjob"],
